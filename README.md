@@ -1,14 +1,15 @@
 # CrewAI Prospects Crew
 
-An AI-powered lead generation system that uses CrewAI to find and qualify potential agency clients. The system specifically targets UK-based influencer marketing agencies that might be interested in AI solutions.
+An AI-powered lead generation system that uses CrewAI to find and qualify potential agency clients. The system searches for agencies based on user-provided search queries and criteria, collecting detailed information and assessing their potential interest in AI solutions.
 
 ## Features
 
-- 🔍 Automated agency research and discovery
-- 📊 Intelligent lead qualification
+- 🔍 Automated agency research without pre-filtering
+- 📊 Lead qualification with AI interest scoring (1-10)
 - 📝 Contact information extraction
-- 💾 Structured data storage (CSV format)
-- 🤖 AI potential assessment
+- 💾 Structured data storage (CSV format with search query)
+- 🤖 Real-time status updates
+- 📥 Downloadable CSV reports
 
 ## Requirements
 
@@ -36,45 +37,61 @@ export OPENAI_API_KEY=your_api_key_here
 
 ## Usage
 
-Run the main script:
+Run the FastAPI application:
 ```bash
-python main.py
+uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-The script will:
-1. Search for potential agency clients
-2. Qualify leads based on specified criteria
-3. Extract contact information
-4. Save results to a CSV file in the `lead_generation_output` directory
+The application will:
+1. Accept a search query and number of prospects
+2. Analyze the search query components
+3. Find exactly the requested number of agencies
+4. Qualify and score each prospect
+5. Save results to a CSV file with the search query included
 
 ## Project Structure
 
 ```
 crewai-prospects-crew/
-├── main.py              # Main script
-├── web_tools.py         # Web scraping and tools
-├── requirements.txt     # Project dependencies
-├── README.md           # Project documentation
-└── lead_generation_output/  # Generated CSV files
+├── app.py              # FastAPI application
+├── main.py            # CrewAI implementation
+├── web_tools.py       # Web scraping and tools
+├── templates/         # HTML templates
+├── static/           # Static files and downloads
+├── requirements.txt   # Project dependencies
+└── README.md         # Project documentation
 ```
 
-## Configuration
+## Agents
 
-You can modify the number of prospects to search for by changing the `NUM_PROSPECTS` constant in `main.py`.
+The system uses four specialized AI agents:
+
+1. **Query Analyzer**: Analyzes search queries and formulates search strategies
+2. **Lead Researcher**: Finds exactly the requested number of agencies
+3. **Lead Qualifier**: Processes and scores each prospect
+4. **Data Manager**: Saves all data in structured CSV format
 
 ## Output
 
-The script generates a CSV file with the following information for each agency:
+The CSV file includes the following information for each agency:
+- Search Query (used to find the agency)
 - Company Name
 - URL
 - Primary Services
-- AI Mentions
+- AI Mentions (Yes/No)
 - Decision Makers
 - Contact Information (Email, Phone)
-- Social Media Links
+- Social Media Links (LinkedIn, Instagram)
 - Physical Address
-- AI Interest Score
+- AI Interest Score (1-10)
 - Qualification Notes
+
+## Important Notes
+
+- The system processes all prospects without pre-filtering
+- Each prospect is processed individually
+- The search query is included in both the CSV filename and data
+- All prospects are included regardless of their AI interest score
 
 ## License
 

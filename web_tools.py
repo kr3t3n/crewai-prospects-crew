@@ -295,6 +295,7 @@ class WebTools:
             
             # Define fieldnames based on expected data structure
             fieldnames = [
+                "Search Query",
                 "Company Name",
                 "URL", 
                 "Primary Services",
@@ -308,6 +309,14 @@ class WebTools:
                 "AI Interest Score",
                 "Qualification Notes"
             ]
+            
+            # Extract search query from the output file name
+            filename = os.path.basename(output_file)
+            # Get everything before _leads_ and replace underscores with spaces
+            search_query = filename.split('_leads_')[0]
+            # Handle multi-word queries by replacing underscores with spaces
+            search_query = ' '.join(word for word in search_query.split('_') if word)
+            print(colored(f"Using search query: {search_query}", "cyan"))
             
             # Convert single dictionary to list if necessary
             if isinstance(data, dict):
@@ -344,8 +353,11 @@ class WebTools:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 for row in data:
-                    # The data is already in the correct format, just write it directly
-                    writer.writerow(row)
+                    row_data = dict(row)  # Create a copy of the row
+                    # Ensure search query is included and matches the filename
+                    if "Search Query" not in row_data or not row_data["Search Query"]:
+                        row_data["Search Query"] = search_query
+                    writer.writerow(row_data)
                 
             print(colored("Data saved successfully", "green"))
             return True

@@ -1,0 +1,10 @@
+crewai
+selenium
+termcolor
+python-dotenv
+openai
+fastapi
+uvicorn
+jinja2
+python-multipart
+aiofiles 

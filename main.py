@@ -14,23 +14,50 @@ if not os.getenv("OPENAI_API_KEY"):
     raise ValueError("OPENAI_API_KEY environment variable is not set")
 
 # Constants
-OUTPUT_DIR = "lead_generation_output"
+OUTPUT_DIR = "static/downloads"
 MODEL = "gpt-4o-mini"
-SEARCH_QUERY = "UK influencer talent marketing agency"
-NUM_PROSPECTS = 3  # Number of agencies to find
+DEFAULT_SEARCH_QUERY = "UK influencer talent marketing agency"
+DEFAULT_NUM_PROSPECTS = 3  # Number of agencies to find
 
-def create_tasks(web_tools):
+def create_tasks(web_tools, search_query=None, num_prospects=None, output_file=None):
     """Create tasks for the crew"""
+    # Use default values if not provided
+    search_query = search_query or DEFAULT_SEARCH_QUERY
+    num_prospects = num_prospects or DEFAULT_NUM_PROSPECTS
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    # Generate output filename if not provided
+    if not output_file:
+        safe_query = "".join(c for c in search_query if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        safe_query = safe_query.replace(' ', '_')[:50]  # Limit filename length
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = os.path.join(OUTPUT_DIR, f"{safe_query}_leads_{timestamp}.csv")
+    
     tasks = []
     
     # Create agents
+    query_analyzer = Agent(
+        role="Query Analyzer",
+        goal="Analyze search query and formulate search strategy",
+        backstory="""You are an expert at understanding search queries and formulating effective search strategies. 
+        You can identify key elements like location, industry, and business type from a query and create a focused 
+        search plan that will yield relevant results.""",
+        tools=web_tools.tools,
+        allow_delegation=False,
+        verbose=True,
+        memory=True,
+        llm_model=MODEL
+    )
+    
     researcher = Agent(
         role="Lead Researcher",
-        goal=f"Find {NUM_PROSPECTS} potential agency clients",
-        backstory="""You are a Senior Research Analyst specializing in identifying potential clients 
-        in the digital marketing space. You have extensive experience in analyzing agency websites 
-        and determining their potential interest in AI solutions. You are thorough in your research 
-        and always verify information from multiple sources.""",
+        goal=f"Find EXACTLY {num_prospects} potential agency clients",
+        backstory="""You are a Senior Research Analyst specializing in identifying potential clients. 
+        You MUST find EXACTLY {num_prospects} agencies, no more, no less. Do not disqualify any agencies 
+        based on AI mentions or potential - just find agencies that match the location and industry. 
+        You are thorough in your research and always verify information from multiple sources.""",
         tools=web_tools.tools,
         allow_delegation=True,
         verbose=True,
@@ -40,12 +67,14 @@ def create_tasks(web_tools):
     
     qualifier = Agent(
         role="Lead Qualifier",
-        goal="Research and qualify the potential clients",
-        backstory="""You are an expert at analyzing companies and identifying their potential fit 
-        for AI solutions. You have a deep understanding of the digital marketing industry and can 
-        effectively assess a company's likelihood of adopting AI technologies. You are meticulous 
-        in gathering and verifying information. You always use the extract_contact_info tool to get 
-        complete contact details and ensure they are properly formatted in your response.""",
+        goal="Research and qualify each potential client",
+        backstory="""You are an expert at analyzing companies and scoring their potential. Your job is to:
+        1. Process EVERY prospect given to you, one at a time
+        2. Collect ALL available information about each prospect
+        3. Score their AI Interest (1-10) based on their technology mentions and innovation focus
+        4. Record ALL information in the CSV, regardless of their score
+        
+        Never skip or disqualify any prospects. Your role is to gather information and score, not to filter.""",
         tools=web_tools.tools,
         allow_delegation=True,
         verbose=True,
@@ -57,8 +86,8 @@ def create_tasks(web_tools):
         role="Data Manager",
         goal="Save lead data in a structured format",
         backstory="""You are an expert at organizing and storing business data. You ensure all 
-        data is properly formatted, validated, and saved in a way that maintains data integrity. 
-        You are meticulous about data quality and always verify the output.""",
+        data is properly formatted and saved. You must include the search query in each row 
+        and save ALL prospects that were qualified, regardless of their scores.""",
         tools=web_tools.tools,
         allow_delegation=False,
         verbose=True,
@@ -66,44 +95,78 @@ def create_tasks(web_tools):
         llm_model=MODEL
     )
     
-    # Task 1: Search for agencies
-    search_task = Task(
-        description=f"""Search for {NUM_PROSPECTS} influencer talent marketing agencies that could be potential clients.
-        Focus on finding UK-based agencies with these characteristics:
-        1. Specializes in influencer marketing and talent management
-        2. Has a strong digital presence
-        3. Works with established influencers/creators
-        4. Shows potential for AI integration
+    # Task 1: Analyze search query
+    analyze_task = Task(
+        description=f"""Analyze the search query "{search_query}" and identify:
+        1. Target location/region
+        2. Industry/business type
+        3. Specific service focus
+        4. Any other relevant criteria
         
-        Search query: "UK influencer talent marketing agency"
+        Format your response as a dictionary with these fields:
+        {{
+            "location": "identified location or region",
+            "industry": "identified industry or business type",
+            "service_focus": "specific service focus",
+            "additional_criteria": ["criterion1", "criterion2", ...]
+        }}
+        """,
+        expected_output="A dictionary containing analyzed search query components",
+        agent=query_analyzer
+    )
+    tasks.append(analyze_task)
+    
+    # Task 2: Search for agencies
+    search_task = Task(
+        description=f"""Using the analyzed query components from the previous task, search for EXACTLY {num_prospects} agencies that match the criteria.
+        Focus on finding agencies that:
+        1. Match the specified location and industry
+        2. Have a digital presence
+        3. Are established businesses (not individual freelancers)
+        4. Have a website with contact information
+        
+        Search query: "{search_query}"
         
         Avoid:
-        - Individual influencers/creators
-        - General marketing agencies
+        - Individual practitioners/freelancers
+        - Generic business listings
         - Directory or listing websites
         - Software platforms
         
-        Return {NUM_PROSPECTS} agency URLs with brief explanations of why you chose each one.
+        You MUST return EXACTLY {num_prospects} agency URLs. Do not filter based on:
+        - AI mentions or technology focus
+        - Size of the agency
+        - Age of the company
+        - Current services offered
+        
+        Process each URL one at a time and return ALL of them.
         """,
-        expected_output=f"A list of {NUM_PROSPECTS} URLs for relevant UK influencer marketing agencies with explanations",
+        expected_output=f"A list of EXACTLY {num_prospects} URLs for relevant agencies",
         agent=researcher
     )
     tasks.append(search_task)
     
-    # Task 2: Qualify the leads
+    # Task 3: Qualify the leads
     qualify_task = Task(
-        description="""For each URL provided in the previous task:
+        description=f"""For EACH URL provided in the previous task:
         1. Research the agency's services and focus
         2. Look for AI or innovation mentions
         3. Analyze their client base and projects
         4. Identify and extract contact information using the extract_contact_info tool
         5. Assess their potential interest in AI solutions
         
-        IMPORTANT: First use the extract_contact_info tool to get ALL contact details and social media links.
-        Then use that information to create your response dictionary.
+        You MUST process EVERY prospect given to you, one at a time, and record their information in the CSV.
+        Never skip or combine prospects. Process each prospect thoroughly before moving to the next one.
+        
+        For each prospect:
+        1. First use the extract_contact_info tool to get ALL contact details and social media links
+        2. Then use get_website_content to analyze their services and AI mentions
+        3. Create a complete dictionary entry with ALL required fields
+        4. Save each prospect to the CSV file immediately after processing
         
         Format your response as a list of dictionaries with EXACTLY these fields for each agency:
-        {
+        {{
+            "Search Query": "{search_query}",  # Add the search query to each entry
             "Company Name": "Exact name of the agency",
             "URL": "The agency's main website URL",
             "Primary Services": "Brief description of main services",
@@ -116,22 +179,25 @@ def create_tasks(web_tools):
             "Physical Address": "Full physical address",  # Use address from extract_contact_info
             "AI Interest Score": 8,  # Number between 1-10
             "Qualification Notes": "Detailed qualification notes"
-        }
+        }}
         
-        Make sure to include ALL contact information found by the extract_contact_info tool in your response.
+        Make sure to:
+        1. Include ALL contact information found by the extract_contact_info tool
+        2. Process and return data for ALL prospects, regardless of their scores
+        3. Include the exact search query in each entry
+        4. Fill in ALL fields for each prospect
+        5. Save each prospect to the CSV file immediately after processing
         """,
         expected_output="A list of dictionaries containing qualified lead information with complete contact details",
         agent=qualifier
     )
     tasks.append(qualify_task)
     
-    # Task 3: Save the data
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = f"lead_generation_output/leads_{timestamp}.csv"
-    
-    save_task_desc = Task(
-        description=f"""Save all qualified leads to a CSV file.
+    # Task 4: Save the data
+    save_task = Task(
+        description=f"""Save all qualified leads to the CSV file.
         The CSV should have the following columns:
+        - Search Query
         - Company Name
         - URL
         - Primary Services
@@ -145,13 +211,18 @@ def create_tasks(web_tools):
         - AI Interest Score
         - Qualification Notes
         
-        IMPORTANT: Make sure to include ALL contact information and social media links in the CSV.
+        IMPORTANT: 
+        1. Make sure to include ALL contact information and social media links in the CSV
+        2. Save ALL prospects that were qualified, regardless of their scores
+        3. The search query "{search_query}" must be included in each row
+        4. Verify that all required fields are present before saving
+        
         Use the save_to_csv_file tool to save the data to: {output_file}
         """,
         expected_output="A confirmation message that the data was saved successfully",
         agent=data_manager
     )
-    tasks.append(save_task_desc)
+    tasks.append(save_task)
     
     return tasks
 
@@ -288,7 +359,7 @@ def main():
         web_tools = WebTools()
         
         print(colored("Creating tasks...", "cyan"))
-        tasks = create_tasks(web_tools)
+        tasks = create_tasks(web_tools)  # Use default values when running directly
         
         print(colored("Setting up crew...", "cyan"))
         crew = Crew(
@@ -298,7 +369,7 @@ def main():
             verbose=True
         )
         
-        print(colored(f"Starting lead generation process for {NUM_PROSPECTS} agencies...", "cyan"))
+        print(colored(f"Starting lead generation process for {DEFAULT_NUM_PROSPECTS} agencies...", "cyan"))
         result = crew.kickoff()
         
         # Process the final result
@@ -319,7 +390,7 @@ def main():
             # Save the data
             save_task(final_result, output_file)
         
-        print(colored(f"\nLead generation process completed successfully for {NUM_PROSPECTS} agencies!", "green"))
+        print(colored(f"\nLead generation process completed successfully for {DEFAULT_NUM_PROSPECTS} agencies!", "green"))
         
     except Exception as e:
         print(colored(f"\nError during lead generation: {str(e)}", "red"))
